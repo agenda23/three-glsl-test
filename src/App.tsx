@@ -1,5 +1,7 @@
 import React, { useRef, useEffect } from "react";
 import * as THREE from "three";
+import fragmentShader1 from './shaders/fragment.glsl';
+import fragmentShader2 from './shaders/fragment2.glsl';
 
 // vertexShader: GLSL ES 3.0 (RawShaderMaterial用)
 const vertexShader = `
@@ -24,63 +26,33 @@ void main() {
 `;
 
 // fragmentShader: 例として3DノイズやHSVなど、GLSL ES 3.0構文で記述
-const fragmentShader = `
-precision highp float;
-
-// 頂点シェーダーから受け取るUV座標
-in vec2 vUv;
-// 出力色
-out vec4 outColor;
-
-// 画面解像度（ピクセル単位）
-uniform vec2 u_resolution; // キャンバスの幅・高さ
-// アニメーション用の経過時間（秒）
-uniform float u_time; // 経過時間
-
-// HSV→RGB変換
-vec3 hsv(float h,float s,float v){
-  vec4 t=vec4(1.,2./3.,1./3.,3.);
-  vec3 p=abs(fract(vec3(h)+t.xyz)*6.-vec3(t.w));
-  return v*mix(vec3(t.x),clamp(p-vec3(t.x),0.,1.),s);
-}
-
-void main() {
-  vec2 resolution = u_resolution; // 画面解像度
-  vec2 fragCoord = gl_FragCoord.xy; // フラグメント座標
-  float time = u_time; // 経過時間
-  vec4 color = vec4(0.0, 0.0, 0.0, 1.0); // 出力色
-
-  float iter = 0.0, accum = 0.0, grad = 0.0, radius = 0.0, scale = 0.0;
-  vec3 rayOrigin = vec3(0.0);
-  vec3 rayPos = vec3(0.0);
-  vec3 rayDir = vec3((fragCoord.yx - 0.5 * resolution) / resolution.y, 0.8); // レイの方向
-
-  rayOrigin.zy -= 1.0;
-
-  for(iter = 0.0; iter < 99.0; iter += 1.0){
-    accum += iter / 9e9;
-    if(iter == 0.0) rayPos = vec3(0.0);
-    color.rgb += hsv(rayPos.y, rayOrigin.y, min(accum * iter, .01));
-
-    scale = 3.0;
-    rayPos = rayOrigin += rayDir * accum * radius * 0.25;
-
-    grad += rayPos.y / scale;
-
-    rayPos = vec3(log2(radius = length(rayPos)) + time * 0.2,
-                  exp2(mod(-rayPos.z, scale) / radius) - 0.23,
-                  rayPos.x);
-
-    for(accum = --rayPos.y; scale < 6000.0; scale += scale){
-      accum += -abs(dot(sin(rayPos.xz * scale), cos(rayPos.zy * scale)) / scale * 0.5);
-    }
+const fragmentShaders = [
+  {
+    code: fragmentShader1,
+    getUniforms: (width: number, height: number) => ({
+      u_resolution: { value: new THREE.Vector2(width, height) },
+      u_time: { value: 0.0 }
+    }),
+    uniformMap: { resolution: 'u_resolution', time: 'u_time' },
+    outColor: 'outColor',
+  },
+  {
+    code: fragmentShader2,
+    getUniforms: (width: number, height: number) => ({
+      u_resolution: { value: new THREE.Vector2(width, height) },
+      u_time: { value: 0.0 }
+    }),
+    uniformMap: { resolution: 'u_resolution', time: 'u_time' },
+    outColor: 'outColor',
   }
-  outColor = color;
-}
-`;
+];
 
 const App: React.FC = () => {
   const mountRef = useRef<HTMLDivElement>(null);
+  const shaderIndexRef = useRef(0);
+  const materialRef = useRef<THREE.RawShaderMaterial | null>(null);
+  const meshRef = useRef<THREE.Mesh | null>(null);
+  let start: number;
 
   useEffect(() => {
     // 初期サイズをwindowサイズに
@@ -106,34 +78,40 @@ const App: React.FC = () => {
     mountRef.current?.appendChild(renderer.domElement);
 
     // シーン・カメラ
-    const scene = new THREE.Scene();
-    const camera = new THREE.OrthographicCamera(
-      width / -2, width / 2, height / 2, height / -2, 0.1, 10
-    );
-    camera.position.z = 1;
-
-    // Planeジオメトリ
-    const geometry = new THREE.PlaneGeometry(width, height);
-
-    // RawShaderMaterial（GLSL ES 3.0用）
-    const material = new THREE.RawShaderMaterial({
-      vertexShader,
-      fragmentShader,
-      uniforms: {
-        u_resolution: { value: new THREE.Vector2(width, height) },
-        u_time: { value: 0.0 }
-      },
-      glslVersion: THREE.GLSL3
-    });
-
-    const mesh = new THREE.Mesh(geometry, material);
-    scene.add(mesh);
-
-    // アニメーションループ
-    const start = Date.now();
+    let scene: THREE.Scene;
+    let camera: THREE.OrthographicCamera;
+    let geometry: THREE.PlaneGeometry;
     let animationId: number;
+    start = Date.now();
+
+    const setupScene = (shaderIdx: number) => {
+      scene = new THREE.Scene();
+      camera = new THREE.OrthographicCamera(
+        width / -2, width / 2, height / 2, height / -2, 0.1, 10
+      );
+      camera.position.z = 1;
+      geometry = new THREE.PlaneGeometry(width, height);
+      const frag = fragmentShaders[shaderIdx];
+      const uniforms = frag.getUniforms(width, height);
+      const material = new THREE.RawShaderMaterial({
+        vertexShader,
+        fragmentShader: frag.code,
+        uniforms,
+        glslVersion: THREE.GLSL3
+      });
+      const mesh = new THREE.Mesh(geometry, material);
+      scene.add(mesh);
+      materialRef.current = material;
+      meshRef.current = mesh;
+    };
+
+    setupScene(0);
+
     const animate = () => {
-      material.uniforms.u_time.value = (Date.now() - start) * 0.001;
+      const frag = fragmentShaders[shaderIndexRef.current];
+      if (materialRef.current) {
+        materialRef.current.uniforms[frag.uniformMap.time].value = (Date.now() - start) * 0.001;
+      }
       renderer.render(scene, camera);
       animationId = requestAnimationFrame(animate);
     };
@@ -149,22 +127,63 @@ const App: React.FC = () => {
       camera.top = height / 2;
       camera.bottom = height / -2;
       camera.updateProjectionMatrix();
-      material.uniforms.u_resolution.value.set(width, height);
+      const frag = fragmentShaders[shaderIndexRef.current];
+      if (materialRef.current) {
+        materialRef.current.uniforms[frag.uniformMap.resolution].value.set(width, height);
+      }
       geometry.dispose();
-      mesh.geometry = new THREE.PlaneGeometry(width, height);
+      if (meshRef.current) {
+        meshRef.current.geometry = new THREE.PlaneGeometry(width, height);
+      }
     };
     window.addEventListener("resize", handleResize);
+
+    // キーボードでシェーダー切り替え
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key >= '1' && e.key <= String(fragmentShaders.length)) {
+        const idx = Number(e.key) - 1;
+        if (idx !== shaderIndexRef.current) {
+          cancelAnimationFrame(animationId);
+          // 古いmesh/materialをsceneからremove/dispose
+          if (meshRef.current) {
+            scene.remove(meshRef.current);
+            meshRef.current.geometry.dispose();
+            if (meshRef.current.material instanceof THREE.Material) {
+              meshRef.current.material.dispose();
+            }
+          }
+          // 新しいものを生成
+          const frag = fragmentShaders[idx];
+          const uniforms = frag.getUniforms(width, height);
+          const material = new THREE.RawShaderMaterial({
+            vertexShader,
+            fragmentShader: frag.code,
+            uniforms,
+            glslVersion: THREE.GLSL3
+          });
+          const mesh = new THREE.Mesh(geometry, material);
+          scene.add(mesh);
+          materialRef.current = material;
+          meshRef.current = mesh;
+          shaderIndexRef.current = idx;
+          animate();
+        }
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
 
     // クリーンアップ
     return () => {
       window.removeEventListener("resize", handleResize);
+      window.removeEventListener('keydown', handleKeyDown);
       cancelAnimationFrame(animationId);
       if (mountRef.current && renderer.domElement.parentNode === mountRef.current) {
         mountRef.current.removeChild(renderer.domElement);
       }
       renderer.dispose();
       geometry.dispose();
-      material.dispose();
+      if (materialRef.current) materialRef.current.dispose();
+      if (meshRef.current) meshRef.current.geometry.dispose();
     };
   }, []);
 
