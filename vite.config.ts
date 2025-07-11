@@ -4,5 +4,6 @@ import glsl from 'vite-plugin-glsl';
 
 // https://vite.dev/config/
 export default defineConfig({
-  plugins: [react(), glsl()]
-})
+  base: '/three-glsl-test/', // GitHub Pages用baseパス
+  plugins: [react(), glsl()],
+});
