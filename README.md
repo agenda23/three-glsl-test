@@ -62,6 +62,53 @@ three-glsl-test/
 - WebGL2対応ブラウザが必要です
 - GLSL ES 3.0構文（in/out/uniform, #version不要, glslVersion: THREE.GLSL3指定）
 
+## GitHub Pagesでのホスティング・自動デプロイ
+
+このプロジェクトはGitHub Pagesで静的ホスティングが可能です。
+
+### 1. Viteのbaseパス設定
+`vite.config.ts` の `base` をリポジトリ名に合わせて設定してください。
+例：
+```ts
+export default defineConfig({
+  base: '/three-glsl-test/', // ←リポジトリ名に合わせる
+  plugins: [react(), glsl()],
+});
+```
+
+### 2. GitHub Actionsによる自動デプロイ
+`.github/workflows/deploy.yml` に以下のようなワークフローを追加します。
+```yaml
+name: Deploy to GitHub Pages
+on:
+  push:
+    branches:
+      - main
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install dependencies
+        run: npm ci
+      - name: Build
+        run: npm run build
+      - name: Deploy to GitHub Pages
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./dist
+```
+
+### 3. GitHub Pagesの設定
+- GitHubリポジトリの「Settings > Pages」で「gh-pages」ブランチを公開対象に設定してください。
+- デプロイ後、`https://<ユーザー名>.github.io/<リポジトリ名>/` でアクセスできます。
+
 ---
 
 ご質問・カスタマイズ要望などあればお気軽にどうぞ！
